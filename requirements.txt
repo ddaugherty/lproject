@@ -1,0 +1,5 @@
+click==7.1.2
+urllib3==1.26.7
+looker_sdk==22.10.0
+PyGithub==1.55
+python-dotenv==0.20.0

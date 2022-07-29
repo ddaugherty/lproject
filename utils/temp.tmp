@@ -1,0 +1,426 @@
+from . import clients
+from . import looker_util
+from looker_sdk.sdk.api40.models import Project, WriteProject, WriteApiSession, WriteGitBranch, WriteLookmlModel, CreateFolder
+# from looker_sdk.sdk.api31.models import Project, WriteProject, WriteApiSession, WriteGitBranch, WriteLookmlModel, CreateFolder
+import subprocess
+import time
+import requests
+import os
+import sys
+import datetime
+
+
+def deploy_production(project_name, github_repo_prefix='looker-'):
+
+    # Local logging file, currently overwritting for dev, switch to append
+    with open('deploy_prod.log', 'w') as log:
+        log.write('\n\n')
+        log.write('** Deploying production version of project: ' +
+                  project_name + '\n')
+        log.write(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        log.write('\n')
+
+    # For early testing
+    project_name = project_name
+    # project_name = project_name+"-TEST"
+
+    # spectacles config files
+    spectacles_dev_config_file = clients.get_spectacles_dev_config_file()
+    spectacles_prod_config_file = clients.get_spectacles_prod_config_file()
+
+    source_folder_root = "demo20220427"  # TODO will eventually be staging
+    destination_folder_root = "production"
+
+    source_folder = f"{project_name}/{source_folder_root}"
+    destination_folder = f"{project_name}/{destination_folder_root}"
+
+    # TODO: Check if folders / project exits
+
+    # Debug
+    print(f"source_folder_root: {source_folder_root}")
+    print(f"source_folder: {source_folder}")
+
+    print(f"destination_folder_root: {destination_folder_root}")
+    print(f"destination_folder: {destination_folder}")
+
+    print(f"project_name: {project_name}")
+
+    # Spectacles check dev before deploy
+
+    # if 1 == 2:  # skip for testing speed
+    print(
+        f"Spectacles check : DEV before deploy - project_name: {project_name}")
+    cmd = f"spectacles connect --config-file {spectacles_dev_config_file} --project {project_name}"
+    print(cmd)
+    spectacles_run_dev = subprocess.run(cmd, shell=True)
+    print(f"spectacles_run_dev.stdout: {spectacles_run_dev.stdout}")
+    # "Connected to Looker version 22.10.32 using Looker API 3.1"
+
+    # TODO: test for error
+    # if 1 == 2:  # skip for testing speed
+    cmd = f"spectacles sql --config-file {spectacles_dev_config_file} --project {project_name}"
+    # --explores my_model/my_explore
+    print(cmd)
+    spectacles_run_dev = subprocess.run(cmd, shell=True)
+    print(f"spectacles_run_dev.stdout2: {spectacles_run_dev.stdout}")
+
+    # TODO: test for error
+
+    # Setup repo
+    try:
+        print("Setup repo access")
+        github_client = clients.get_github_client()
+        repo_name = github_repo_prefix + project_name
+        org = github_client.get_organization('recurve-inc')
+        github_repo_url = f'git@github.com:recurve-inc/{repo_name}.git'
+    except e:
+        print("Error: github client\n")
+
+    # Looker SDK : Two Instances Dev / Prod
+    sdk_dev = clients.get_looker_sdk()
+    sdk_production = clients.get_prod_looker_sdk()
+
+    # debug
+    print("deploy_production: Beta\n")
+    print(f"project name: {project_name}")
+
+    # Check if project exists on production
+    if not project_name in [p.name for p in sdk_production.all_projects()]:
+        print(f"*** Creating Project {project_name}.")
+        # Create project on Production
+        response = sdk_production.create_project(
+            Project(name=project_name)
+        )
+    else:
+        print(f"*** Project {project_name} exists.\n")
+        # raise Exception(f"Project {project_name} already exists on production.")
+
+    # Update Project on Production Instance
+    # Set Advance deploy mode although it should already be on.
+    print("Updating to Advance deploy mode\n")
+    response = sdk_production.update_project(
+        project_id=project_name,
+        body=WriteProject(git_release_mgmt_enabled=True)
+    )
+
+    # Update to dev mode
+    print("Update to Develop Mode\n")
+    response = sdk_production.update_session(
+        body=WriteApiSession(workspace_id="dev")
+    )
+
+    # Check for existance of production branch in repo, create if needed
+    # TODO: Should always be here, error if not, do not create
+    print(f"Checking repo: {repo_name}")
+    repo = None
+    if not repo_name in [r.name for r in org.get_repos()]:
+        print(f"Repo {repo_name} does not exit, creating... ")
+        org.create_repo(repo_name, private=True)
+        repo = org.get_repo(repo_name)
+        repo.create_file('README.md', 'Init', '# README.md')
+    else:
+        repo = org.get_repo(repo_name)
+        print(f"Repo exists: {repo}")
+
+    # set up Github deploy key
+    try:
+        # get existing deploy key from Looker, if it exists
+        print("Get deploy key.")
+        deploy_key = sdk_production.git_deploy_key(
+            project_name).split(' Looker')[0]
+        # print(f"deploy_key: {deploy_key}")
+        # if not already linked to Github repo, link it
+        if deploy_key not in [k.key for k in repo.get_keys()]:
+            repo.create_key(key=deploy_key, title='Looker', read_only=False)
+    except Exception as e:
+        # this might fail if there is no key in Looker yet
+        # or if the key has already been linked to a different repo
+
+        # create a new deploy key in Looker and link to Github
+        print("exception:")
+        deploy_key = sdk_production.create_git_deploy_key(project_name)
+        # print(f"deploy Key: {deploy_key}")
+        repo.create_key(key=deploy_key.split('Looker')[
+                        0], title='Looker', read_only=False)
+
+    # Update project with Repo URL
+    response = sdk_production.update_project(
+        project_name,
+        WriteProject(name=project_name,
+                     git_remote_url=github_repo_url, git_service_name='github')
+    )
+
+    # Create deploy branch
+    # Check for test_branch, create if needed:
+    # response = sdk_production.create_git_branch(project_name, body=WriteGitBranch(name='test_branch'))
+    # print(response)
+
+    response = sdk_production.all_git_branches(project_name)
+    active_git_branch_dev = sdk_production.git_branch(project_name)
+
+    print(f"active_git_branch_dev: {active_git_branch_dev}")
+
+    # Call SDK.update_lookml_model for each model for the project.
+    models_production = looker_util.get_models(project_name, sdk_production)
+    models_dev = looker_util.get_models(project_name, sdk_dev)
+
+    print(f"models_dev: {models_dev}")
+
+    for model in models_dev:
+        if model not in models_production:
+            print(f"model {model} not in production, creating...")
+
+            response = sdk_production.create_lookml_model(
+                body=WriteLookmlModel(
+                    name=model,
+                    project_name=project_name,
+                    unlimited_db_connections=True
+                ))
+
+            print(f"create_lookml_model: {response}")
+
+        else:
+            print(f"model {model} exists in production")
+
+            response = sdk_production.update_lookml_model(
+                lookml_model_name=model,
+                body=WriteLookmlModel(
+                    name=model,
+                    project_name=project_name
+                ))
+
+            print(f"update_lookml_model: {response}")
+
+    # TODO: Required for the new project
+    try:
+        git_branch = active_git_branch_dev.name
+        print(f"active_git_branch_dev: {git_branch}")
+        response = sdk_production.deploy_ref_to_production(
+            project_name, git_branch)
+        print(response)
+
+    except Exception as err:
+        print(f"Error deploying code: {git_branch} to project: {project_name}")
+        print(f"{err}")
+        # sys.exit(1)
+
+    # response = sdk_production.deploy_ref_to_production(project_name, "test_branch")
+    # response = sdk_production.update_git_branch(project_name)
+    # print(response)
+
+    # Using Deployer to move project folders, etc.
+    # Looker.ini labled [Looker] & [LookerProduction]
+
+    # Create Gazer config until it is removed from Deployer
+    clients.create_gazer_configfile()
+
+    # chmod from clients does not seem to be working, so do it here for now.
+    cmd = f"chmod 0600 /root/.netrc"
+    fileop = subprocess.run(cmd, shell=True)
+
+    # Test for Deployer
+    # print("Deployer check: version")
+    # cmd = f"ldeploy -v"
+    # print(f"Deployer init check:")
+    # ldeploy_test = subprocess.run(cmd, shell=True)
+
+    # DEBUG Gzr check
+    # print("Gzr check: version")
+    # cmd = f"gzr -v"
+    # gzr_test01 = subprocess.run(cmd, shell=True)
+    # print(f"gzr_test02")
+    # cmd = f"gzr user ls --host=recurveprod.cloud.looker.com"
+    # gzr_test02 = subprocess.run(cmd, shell=True)
+
+
+    # Source folders start from Shared / Production, will search all folders for
+    # "Production" that has a parent pointing to Shared.  Then look for: <project_name>/source_folder_root (project/staging, etc.)
+    all_folders_source = sdk_dev.all_folders()
+    all_folders_destination = sdk_production.all_folders()
+
+    # Find Shared folder ID, which is almost always 1
+    shared_folder_id_source = [f.id for f in all_folders_source if f.name == "Shared" and f.parent_id == None][0]
+
+    if shared_folder_id_source is None:
+        print("Shared folder not found")
+        sys.exit(1)
+
+
+    # Find production_folder_id_source that is direct child of Shared folder
+    # production_folders = [(f.name, f.id, f.parent_id) for f in all_folders_source if f.name == "Production" and f.parent_id == shared_folder_id_source]
+    # print( f"production_folders: {production_folders}")
+    production_folder_id_source = [f.id for f in all_folders_source if f.name == "Production" and f.parent_id == shared_folder_id_source][0]
+
+    # Find project_folder_id_source with production_folder_id_source as parent
+    project_folder_id_source = [f.id for f in all_folders_source if f.name == project_name and f.parent_id == production_folder_id_source][0]
+
+    # Todo - check if project_folder_id_source is None
+
+    # find source_folder_id with project_folder_id_source as parent
+    source_folder_id = [f.id for f in all_folders_source if f.parent_id == project_folder_id_source
+                        if f.name == source_folder_root
+                        and f.parent_id == project_folder_id_source][0]
+
+    # TODO: Handle missing source_folder_id
+    if source_folder_id is None:
+        print("missing source folder")
+        sys.exit(1)
+
+    # Debug
+    print(f"shared_folder_id_source: {shared_folder_id_source}")
+    print(f"production_folder_id_source: {production_folder_id_source}")
+    print(f"project_folder_id_source: {project_folder_id_source}")
+    print(f"source_folder_id: {source_folder_id}")
+
+
+    # find destination folder IDs
+
+    shared_folder_id_destination = [f.id for f in all_folders_destination if f.name == "Shared" and f.parent_id == None][0]
+    # TODO check for missing shared_folder_id_destination
+
+    project_folder_id_destination = [f.id for f in all_folders_destination if f.name == project_name and f.parent_id == shared_folder_id_destination][0]
+
+    # Create project folder under Shared on Destination if it doesn't exist
+    # Not needed under new paradigm
+    if not project_folder_id_destination:
+        print(f"Project Folder not found at destination, creating...")
+        result = sdk_production.create_folder( body=CreateFolder(name=project_name, parent_id=shared_folder_id_destination))
+        print(f"create_folder: {result}")
+        project_folder_id_destination = result.id;
+
+    # target_folder_id = None
+    # destination_folder_id = None
+    # destination_folder_parent = None
+    # for name, id, parent_id in project_folders_destination:
+    #     destination_folder_parent = sdk_production.folder(parent_id)
+    #     if name == destination_folder and destination_folder_parent.name == project_name:
+    #         destination_folder_id = id
+
+    # print(f"destination_folder_parent.name: {destination_folder_parent.name}")
+    print(f"project_folder_id_destination: {project_folder_id_destination}")
+    print(f"shared_folder_id_destination: {shared_folder_id_destination}")
+
+
+
+    # for name, id, parent_id in project_folders_dev:
+    # print ("name: ", name)
+    # print("id: ", id)
+    # print("parent_id: ", parent_id)
+    # folder = sdk_dev.folder(parent_id)
+    # print(f"folder(parent_id): {folder.name}")
+
+    # gzr_host = os.getenv('LOOKER_PROD_URI')  # LOOKER_PROD_URI | LOOKER_URI
+    # print(f"Gazer Host: {gzr_host}")
+    # cmd = f"gzr user me --no-ssl --port=443 --host={gzr_host}"
+    # print(cmd)
+    # gzr_test = subprocess.check_call(cmd, shell=True)
+    # ERROR: Connection Failed.
+    # Did you specify the --no-ssl option for an ssl secured server?
+    # You may need to use --port=443 in some cases as well.
+
+    ##### OLD: Deployer removed, going to conver to LookML dashboards and add to repo.
+
+
+
+    # export folder
+    # cmd = f"ldeploy content export --env Looker --folders {source_folder_id} --local-target ./dev-folder-export"
+    # print(cmd)
+
+    # try:
+        # ldeploy_test = subprocess.check_call(cmd, shell=True)
+        # print(ldeploy_test)
+    # except Exception as e:
+        # print(f"ldeploy err: {e}")
+
+    #   File "/usr/local/lib/python3.7/site-packages/looker_deployer/commands/deploy_content.py", line 75, in get_gzr_creds
+    #   host, port = env_record["base_url"].replace("https://", "").split(":")
+    #   ValueError: not enough values to unpack (expected 2, got 1)
+
+    # ldeploy content import --env LookerProduction --folders ./dev-folder-export --recursive --target-folder Shared/oeem-demo-platform/production
+    # ldeploy content import --env LookerProduction --folders ./dev-folder-export --recursive --target-folder {target_folder_name}
+    # Spectacles check production after deploy
+
+
+
+    # Get user defined dashboards from source_folder_id
+    source_user_dashboardIDs = sdk_dev.folder_dashboards(
+        folder_id=source_folder_id,
+        fields="id")
+
+    for db in source_user_dashboardIDs:
+        source_db_id = db.id
+        print(f"db: {source_db_id}")
+
+        resp_db_lookml = sdk_dev.dashboard_lookml(dashboard_id=source_db_id)
+        db_lookml_id = resp_db_lookml.dashboard_id
+        db_lookml = resp_db_lookml.lookml
+
+
+        # print(db_lookml_id)
+        # print(len(db_lookml))
+
+        response = sdk_production.import_dashboard_from_lookml(
+            body=model.WriteDashboardLookml(
+            folder_id=project_folder_id_destination,
+            lookml=db_lookml
+        ))
+
+        print(f"response: {response}")
+
+
+    # Spectacles check on moved over production version
+    # if 1 == 0:
+    # print(
+    #     f"Spectacles check : PROD after deploy:: {spectacles_prod_config_file}")
+    # cmd = f"spectacles connect --config-file {spectacles_prod_config_file}"
+    # print(cmd)
+    # spectacles_run_prod = subprocess.run(cmd, shell=True)
+    # print(f"spectacles_run_dev.stdout: {spectacles_run_prod.stdout}")
+
+    # TODO: check for error
+
+    # if spectacles_run_prod != 0:
+    #     print("Spectacles PROD Check failed.")
+    #     return
+    # else:
+    #     print("Spectacles PROD Check successful.")
+
+    # Close local log file
+    log.close()
+
+    # Write log to repo?
+
+    # DEBUG INFO
+
+    # with open("deploy_prod.log", "r") as file:
+        # for line in file:
+            # print(line)
+    # file.close()
+
+    # for k, v in sorted(os. environ. items()):
+    # print(k+':', v)
+    # print('\n')
+
+    from os import walk
+    print(next(walk("./"), (None, None, []))[2])
+    print(next(walk("/root"), (None, None, []))[2])
+
+    print(f"\nProjects: {[p.name for p in sdk_production.all_projects()]}")
+
+    print(
+        f"Existing projects (prod): {[p.name for p in sdk_production.all_projects()]}\n")
+
+    # Swich back from dev to production mode
+    print("Switching back to production mode.")
+    response = sdk_production.update_session(
+        body=WriteApiSession(workspace_id="production")
+    )
+    print(response)
+
+    # Set Advance deploy mode off?  This is on by default.
+    # print("Switch off Advance deploy mode\n")
+    # response = sdk_production.update_project(
+    #     project_id=project_name,
+    #     body=WriteProject(git_release_mgmt_enabled=False)
+    # )
+    # print(response)
