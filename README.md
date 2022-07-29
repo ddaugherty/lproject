@@ -5,6 +5,15 @@
 ```
 lproject copy {project_name}
 ```
+### Copy folder and User defined dashboards
+```
+lproject copy --folder_name={name of folder}
+```
+### Combined
+```
+lproject copy {project_name} --folder_name={name of folder}
+```
+
 This is use a source and destination instance as defined by [Source] and [Destination] in the looker.ini config file by default. 
 It will also use the default GitHub API Token and GitHub Organization as defined by GITHUB_API_TOKEN and GITHUB_ORG in the .env file.
 
@@ -33,6 +42,10 @@ Pass Folder names to copy
 Change project ID / Name at destination 
 Chose specifc source repo branch / tag to copy 
 ```
+
+## Installation 
+### Clone this repo
+```run pip3 install -r requirements.txt```
 
 ## Setup
 ### looker.ini 
