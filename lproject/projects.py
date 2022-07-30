@@ -1,10 +1,7 @@
 import os
-import asyncio
-
-from utils import clients
+from lproject.utils import clients
 from looker_sdk.sdk.api40 import models
 import sys
-from dotenv import load_dotenv
 
 
 def get_project_repo_url(project_id: str, sdk: any) -> str:
@@ -52,7 +49,7 @@ def copy_folder(folder_name: str, folder_id: int, source: str, destination: str)
 
         # Find Shared folder ID, which is almost always 1
         shared_folder_id_destination = \
-        [f.id for f in folders_all_destination if f.name == "Shared" and f.parent_id is None][0]
+            [f.id for f in folders_all_destination if f.name == "Shared" and f.parent_id is None][0]
 
         if shared_folder_id_destination is None:
             print("Shared folder not found at destination.")
@@ -82,7 +79,8 @@ def copy_folder(folder_name: str, folder_id: int, source: str, destination: str)
         folder_name = sdk_source.folder(folder_id_to_copy).name
         print(f"Folder name: {folder_name}")
 
-    print(f"Copying folder: {folder_name } (id: {folder_id_to_copy}) and user defined dashboards from {source} to {destination}")
+    print(
+        f"Copying folder: {folder_name} (id: {folder_id_to_copy}) and user defined dashboards from {source} to {destination}")
 
     # create folder at destination if needed, putting under Sharded #TODO
 

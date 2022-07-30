@@ -1,6 +1,6 @@
-
 import click
-from utils.projects import copy_project, copy_folder
+from lproject.projects import copy_project, copy_folder
+# from projects import copy_project, copy_folder
 
 @click.group()
 def cli():

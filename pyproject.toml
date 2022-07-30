@@ -1,0 +1,20 @@
+[project]
+name = "LookerProjectUtility"
+description = "Looker Project Utility"
+version = "0.0.2"
+requires-python = ">=3.8"
+
+[build-system]
+build-backend = "setuptools.build_meta"
+requires = ["setuptools", "wheel"]
+
+#
+# dependencies = [
+#     'click==7.1.2',
+#     'urllib3==1.26.7',
+#     'looker_sdk==22.10.0',
+#     'PyGithub==1.55',
+#     'python-dotenv==0.20.0',
+#     'python_version>="3.8"',
+# ]
+#

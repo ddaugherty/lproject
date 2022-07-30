@@ -44,8 +44,8 @@ Chose specifc source repo branch / tag to copy
 ```
 
 ## Installation 
-### Clone this repo
-```run pip3 install -r requirements.txt```
+### Clone this repo, run:
+```pip3 install -r requirements.txt```
 
 ## Setup
 ### looker.ini 
