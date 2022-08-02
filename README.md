@@ -1,4 +1,4 @@
-# Looker Project Utility : lproject
+# Looker Project Utility : lproject (installable version)
 
 ## Usage: 
 ### Copy Project
@@ -26,26 +26,28 @@ It will also use the default GitHub API Token and GitHub Organization as defined
 i.e. lproject copy --project_id=customer_progect --source=Development --destination=Production 
 ```
 
-# NEXT ##############################################################################
-branch = "main" | "master", unless passed through --branch flag
-
-folder (single) - --folder name  (User Defined Dashboards in Folder)
-
--- force (overwrite destination project)
-#####################################################################################
-
-
-
 ### Future Enhancements: 
 ```
-Pass Folder names to copy
+branch = "main" | "master", unless passed through --branch flag
 Change project ID / Name at destination 
 Chose specifc source repo branch / tag to copy 
+force (overwrite destination project)
 ```
 
 ## Installation 
-### Clone this repo, run:
+
+### Option 1:
+ Clone this repo, run: 
+
 ```pip3 install -r requirements.txt```
+
+### Option 2:
+Copy the whl file from /dist/LookerProjectUtility*.whl to a local directory.
+
+### 
+
+```pip3 install -m Looker``` 
+
 
 ## Setup
 ### looker.ini 
